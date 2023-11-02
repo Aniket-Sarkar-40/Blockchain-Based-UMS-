@@ -1,17 +1,25 @@
 from hashlib import sha512
 import json
+from bson import ObjectId
 import time
-
-
+import random
+from flask_pymongo import PyMongo
 
 from flask import Flask, request
 import requests
 
 
+
+# Flask web application
+# create Flask web application
+app = Flask(__name__)
+
+app.config['MONGO_URI'] = "mongodb+srv://aniket15970:3Zmg1JzbEZWO3Gjw@esm.nrjexdy.mongodb.net/pendingTxn?retryWrites=true&w=majority"
+mongo = PyMongo(app)
+dbPendingTxn = mongo.db
+
 # A class that represents a Block, whcih stores one or more
 # pieces of data, in the immutable Blockchain
-
-
 class Block:
     # One or more piece of data(author, contetn of post and timestamp) will be stored in a block
     # The blocks containing the data are generated frequently and added to the blockchain. These block has unique ID.
@@ -29,9 +37,29 @@ class Block:
         block_string = str(self.index)  + str(self.transactions) + str(self.previous_hash) + str(self.nonce)
         # block_string = json.dumps(self.__dict__, sort_keys=True)
         return sha512(block_string.encode()).hexdigest()
-
 # End of Block class
 
+def unconfirmed_transactions():
+    all_pending_txn = dbPendingTxn.pendingTransaction.find()
+    pendingTxn = []
+
+    for data in all_pending_txn:
+        collegeName = data["collegeName"]
+        phoneNo = data["phoneNo"]
+        email = data["email"]
+        message = data["message"]
+        timestamp = data["timestamp"]
+        dataDict = {
+            "collegeName" : collegeName,
+            "phoneNo" : phoneNo,
+            "email" : email,
+            "message" : message,
+            "timestamp" : timestamp
+        }
+
+        pendingTxn.append(dataDict)
+
+    return pendingTxn
 
 # A class that represents an immutable list of Block objects are chained together by hashes, a Blockchain.
 class Blockchain:
@@ -39,7 +67,7 @@ class Blockchain:
     difficulty = 2
     # One or more blocks will be stored and chained toghether on the Blockchain, starting by the genisi block
     def __init__(self):
-        self.unconfirmed_transactions = [] # These are pieces of data that are not yet added to the Blockchain.
+        # self.unconfirmed_transactions = self.unconfirmed_transactions()  # These are pieces of data that are not yet added to the Blockchain.
         self.chain = [] # The immutable list that represets the actual Blockchain
         self.create_genesis_block()
 
@@ -68,12 +96,13 @@ class Blockchain:
     # and then figuring out the PoW
     def mine(self):
         # if uncofirmed_transactions is empyt, no mining to be done
-        if not self.unconfirmed_transactions:
+        pending_txns = unconfirmed_transactions()
+        if not pending_txns:
             return False
         last_block = self.last_block
         # Creates a new block to be added to the chain
         new_block = Block(last_block.index + 1, \
-                    self.unconfirmed_transactions, \
+                    pending_txns, \
                     time.time(), \
                     last_block.hash)
 
@@ -82,7 +111,9 @@ class Blockchain:
         # Verifed block can be added to the chain (Previosu hash matches and PoW is valid) then add it
         # self.add_block(new_block, proof)
         # Empties the list of unconfirmed transactions since they are added to the chain
-        self.unconfirmed_transactions = []
+        # self.unconfirmed_transactions = []
+
+        dbPendingTxn.pendingTransaction.delete_many({})
         # Announce to the network once a block has been mined, other blocks can simply verify the PoW and add it to the respective chains
         announce_new_block(new_block)
         # Returns the index of the blockthat was added to the chain
@@ -104,8 +135,17 @@ class Blockchain:
 
     # Adds a new transaction to the list of unconfirmed transactions(not yet in the blockchain)
     def add_new_transaction(self, transaction):
-        self.unconfirmed_transactions.append(transaction)
+        res = None
+        prevTxn = unconfirmed_transactions()
+        if(len(prevTxn)>=10):
+            res = mine_in_interval()
 
+        dbPendingTxn.pendingTransaction.insert_one(transaction)
+
+        return res
+        # self.unconfirmed_transactions.append(transaction)
+        # self.unconfirmed_transactions = self.unconfirmed_transactions()
+        # print(self.unconfirmed_transactions)
         # Checks if the chain is valid at the current time
 
     @classmethod
@@ -136,31 +176,82 @@ class Blockchain:
 
 
 
-# Flask web application
-# create Flask web application
-app = Flask(__name__)
 # The node's copy of the blockchain
 blockchain = Blockchain()
 # A set that stores the addresses to other participating members in the network
 peers = set()
 peers.add("127.0.0.1:5000")
 peers.add("127.0.0.1:5001")
-# peers.add("127.0.0.1:5002")
-# peers.add("127.0.0.1:5003")
-# peers.add("127.0.0.1:5004")
+peers.add("127.0.0.1:5002")
+peers.add("127.0.0.1:5003")
+peers.add("127.0.0.1:5004")
+
+# previous_item = None
+
+tempList = []
+peerList = list(peers)
+
+def getMinner():
+    global tempList
+    global peerList
+    if len(peerList) == 0:
+        while tempList:  # While tempList is not empty, remove all items from it
+            peerList.append(tempList.pop())
+    selected_item = random.choice(list(peerList))
+    peerList.remove(selected_item)
+    tempList.append(selected_item)
+    return selected_item
+
+# def getMinner(item_set):
+#     global previous_item
+#     item_list = list(item_set)
+#     while True:
+#         selected_item = random.choice(item_list)
+#         if selected_item != previous_item:
+#             previous_item = selected_item
+#             return selected_item
 
 # Create a new endpoint and binds the function to the uRL
 @app.route("/new_transaction", methods=["POST"])
 # Submit a new transaction, which add new data to the blochain
 def new_transaction():
     tx_data = request.get_json()
-    required_fields = ["author", "content"]
+    required_fields = ["collegeName", "phoneNo", "email", "message" ]
     for field in required_fields:
         if not tx_data.get(field):
             return "Invalid transaction data", 404
     tx_data["timestamp"] = time.time()
-    blockchain.add_new_transaction(tx_data)
-    return "Success", 201
+    res = blockchain.add_new_transaction(tx_data)
+    
+    if res==None:
+        response = {"message": "Transaction added successfully."}
+    else:
+        response = {"message" : "Transaction added successfully." , "Mine" : res}
+    return response, 201
+
+
+
+
+#*image upload
+@app.route('/upload', methods=['POST'])
+def upload_image():
+    # Check if 'image' file was included in the request
+    if 'image' not in request.files:
+        return 'No image file provided', 400
+
+    image_file = request.files['image']
+
+    image_data = image_file.read()
+    tx_data = {"image" : image_data , "timestamp":time.time()}
+
+    res = blockchain.add_new_transaction(tx_data)
+    
+    if res==None:
+        response = {"message": "Transaction added successfully."}
+    else:
+        response = {"message" : "Transaction added successfully." , "Mine" : res}
+    return response, 201
+
 
 
 @app.route("/chain", methods=["GET"])
@@ -169,7 +260,7 @@ def get_chain():
     chain_data = []
     for block in blockchain.chain:
         chain_data.append(block.__dict__)
-    return json.dumps({"length" : len(chain_data), "chain" : chain_data})
+    return {"length" : len(chain_data), "chain" : chain_data} , 200
         
 
 # Create a new endpoint and bind the function to the URL
@@ -178,8 +269,9 @@ def get_chain():
 def mine_uncofirmed_transactions():
     result = blockchain.mine()
     if not result:
-        return "There are not transactions to mine"
-    return "Block #{0} has been mined.".format(result)
+        return {"message": "There are not transactions to mine"},200
+    response = "Block #{0} has been mined.".format(result)
+    return {"message" : response},200
 
 
 # Cretes a new endpoint and binds the function to the URL
@@ -196,29 +288,48 @@ def register_new_peers():
 # Create new endpoint and bind the function to the URL
 @app.route("/pending_tx")
 # Queries uncofirmed transactions
-
 def get_pending_tx():
-    return json.dumps(blockchain.unconfirmed_transactions)
+    all_pending_txn = dbPendingTxn.pendingTransaction.find()
+    pendingTxn = []
+
+    for data in all_pending_txn:
+        collegeName = data["collegeName"]
+        phoneNo = data["phoneNo"]
+        email = data["email"]
+        message = data["message"]
+        timestamp = data["timestamp"]
+        dataDict = {
+            "collegeName" : collegeName,
+            "phoneNo" : phoneNo,
+            "email" : email,
+            "message" : message,
+            "timestamp" : timestamp
+        }
+
+        pendingTxn.append(dataDict)
+
+
+    return {"data" : pendingTxn}
 
 
 # A simple algorithm to achieve consensus to mantain the intergrity of Blochain
 # If a longer valid chain is found, the chain is replaced with it and returns True, otherwise nothing happens and returns false
-def consensus():
-    global blockchain
-    longest_chain = None
-    curr_len = len(blockchain.chain)
-    # Achieve consensus by chacking th Json fields of every node in the network
-    for node in peers:
-        response = requests.get("http://{0}".format(node))
-        length = response.json()["length"]
-        chain = response.json()["chain"]
-        if length > curr_len and blockchain.check_chain_validity(chain):
-            curr_len = length
-            longest_chain = chain
-    if longest_chain:
-        blockchain = longest_chain
-        return True
-    return False
+#* def consensus():
+#     global blockchain
+#     longest_chain = None
+#     curr_len = len(blockchain.chain)
+#     # Achieve consensus by chacking th Json fields of every node in the network
+#     for node in peers:
+#         response = requests.get("http://{0}".format(node))
+#         length = response.json()["length"]
+#         chain = response.json()["chain"]
+#         if length > curr_len and blockchain.check_chain_validity(chain):
+#             curr_len = length
+#             longest_chain = chain
+#     if longest_chain:
+#         blockchain = longest_chain
+#         return True
+#     return False
 
 
 # Create a new endpoint and binds the function to the URl
@@ -238,19 +349,31 @@ def validate_and_add_block():
 
 
 # Announce to the network once a block has been moned
+
 def announce_new_block(block):
     for peer in peers:
         url = "http://{0}/add_block".format(peer)
-        data=json.dumps(block.__dict__, sort_keys=True)
-        # print(url+"    "+data)
-        requests.post(url, json=data)
+        data = block.__dict__
+
+        # Convert ObjectId to string before serialization
+        data['previous_hash'] = str(data['previous_hash'])
+
+        # Serialize the data to JSON
+        json_data = json.dumps(data,  default=str, sort_keys=True)
+
+        requests.post(url, json=json_data)
+
+
+
+def mine_in_interval():
+    minner = getMinner()
+    # print(minner,peerList,tempList)
+    url = f'http://{minner}/mine'
+    res = requests.get(url)
+    return res.json().get('message')
+
 
 # Run the Flask web app
 if __name__ == "__main__":
     port = int(input("Enter the port number for this node: "))
     app.run(host="0.0.0.0", port=port)
-
-
-
-
-
