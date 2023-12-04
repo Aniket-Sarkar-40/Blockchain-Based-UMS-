@@ -9,14 +9,10 @@ import getKey
 def encrypt(messageObject, sender_public_key):
     message = json.dumps(messageObject)
     
-
     key = Fernet.generate_key()
-    # print(key)
 
     f_obj = Fernet(key)
-
     encryption_message1 = f_obj.encrypt(message.encode())
-
     # Encrypt the Fernet key using RSA public key
     encrypted_fernet_key = sender_public_key.encrypt(
         key,
@@ -28,9 +24,6 @@ def encrypt(messageObject, sender_public_key):
     )
 
     # Now 'encrypted_fernet_key' contains the encrypted Fernet key
-    # print("Encrypted Fernet Key:", encrypted_fernet_key)
-
-
     # sending data
     data = {
         "key" : encrypted_fernet_key,
