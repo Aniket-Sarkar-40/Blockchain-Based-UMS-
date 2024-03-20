@@ -14,9 +14,9 @@ import requests
 # create Flask web application
 app = Flask(__name__)
 
-app.config['MONGO_URI'] = "mongodb+srv://aniket15970:3Zmg1JzbEZWO3Gjw@esm.nrjexdy.mongodb.net/pendingTxn?retryWrites=true&w=majority"
+app.config['MONGO_URI'] = "mongodb+srv://aniket15970:3Zmg1JzbEZWO3Gjw@esm.nrjexdy.mongodb.net/ums?retryWrites=true&w=majority"
 mongo = PyMongo(app)
-dbPendingTxn = mongo.db
+db = mongo.db
 
 # A class that represents a Block, whcih stores one or more
 # pieces of data, in the immutable Blockchain
@@ -40,24 +40,13 @@ class Block:
 # End of Block class
 
 def unconfirmed_transactions():
-    all_pending_txn = dbPendingTxn.pendingTransaction.find()
+    all_pending_txn = db.pendingTransaction.find()
     pendingTxn = []
 
     for data in all_pending_txn:
-        collegeName = data["collegeName"]
-        phoneNo = data["phoneNo"]
-        email = data["email"]
-        message = data["message"]
-        timestamp = data["timestamp"]
-        dataDict = {
-            "collegeName" : collegeName,
-            "phoneNo" : phoneNo,
-            "email" : email,
-            "message" : message,
-            "timestamp" : timestamp
-        }
-
-        pendingTxn.append(dataDict)
+        
+        del data['_id']
+        pendingTxn.append(data)
 
     return pendingTxn
 
@@ -113,7 +102,7 @@ class Blockchain:
         # Empties the list of unconfirmed transactions since they are added to the chain
         # self.unconfirmed_transactions = []
 
-        dbPendingTxn.pendingTransaction.delete_many({})
+        db.pendingTransaction.delete_many({})
         # Announce to the network once a block has been mined, other blocks can simply verify the PoW and add it to the respective chains
         announce_new_block(new_block)
         # Returns the index of the blockthat was added to the chain
@@ -140,7 +129,7 @@ class Blockchain:
         if(len(prevTxn)>=10):
             res = mine_in_interval()
 
-        dbPendingTxn.pendingTransaction.insert_one(transaction)
+        db.pendingTransaction.insert_one(transaction)
 
         return res
         # self.unconfirmed_transactions.append(transaction)
@@ -202,21 +191,34 @@ def getMinner():
     tempList.append(selected_item)
     return selected_item
 
-# def getMinner(item_set):
-#     global previous_item
-#     item_list = list(item_set)
-#     while True:
-#         selected_item = random.choice(item_list)
-#         if selected_item != previous_item:
-#             previous_item = selected_item
-#             return selected_item
 
 # Create a new endpoint and binds the function to the uRL
 @app.route("/new_transaction", methods=["POST"])
 # Submit a new transaction, which add new data to the blochain
 def new_transaction():
     tx_data = request.get_json()
+    print(tx_data)
     required_fields = ["collegeName", "phoneNo", "email", "message" ]
+    for field in required_fields:
+        if not tx_data.get(field):
+            return "Invalid transaction data", 404
+    tx_data["timestamp"] = time.time()
+    res = blockchain.add_new_transaction(tx_data)
+    
+    if res==None:
+        response = {"message": "Transaction added successfully."}
+    else:
+        response = {"message" : "Transaction added successfully." , "Mine" : res}
+    return response, 201
+
+
+
+@app.route("/newPrivateBlockTransaction", methods=["POST"])
+# Submit a new transaction, which add new data to the blochain
+def newPrivateBlockTransaction():
+    tx_data = json.loads(request.get_json()) 
+    
+    required_fields = ["sender_id", "message" ]
     for field in required_fields:
         if not tx_data.get(field):
             return "Invalid transaction data", 404
@@ -289,25 +291,12 @@ def register_new_peers():
 @app.route("/pending_tx")
 # Queries uncofirmed transactions
 def get_pending_tx():
-    all_pending_txn = dbPendingTxn.pendingTransaction.find()
+    all_pending_txn = db.pendingTransaction.find()
     pendingTxn = []
 
     for data in all_pending_txn:
-        collegeName = data["collegeName"]
-        phoneNo = data["phoneNo"]
-        email = data["email"]
-        message = data["message"]
-        timestamp = data["timestamp"]
-        dataDict = {
-            "collegeName" : collegeName,
-            "phoneNo" : phoneNo,
-            "email" : email,
-            "message" : message,
-            "timestamp" : timestamp
-        }
-
-        pendingTxn.append(dataDict)
-
+        del data["_id"]
+        pendingTxn.append(json.loads(json.dumps(data)))
 
     return {"data" : pendingTxn}
 
@@ -367,7 +356,6 @@ def announce_new_block(block):
 
 def mine_in_interval():
     minner = getMinner()
-    # print(minner,peerList,tempList)
     url = f'http://{minner}/mine'
     res = requests.get(url)
     return res.json().get('message')
@@ -376,4 +364,4 @@ def mine_in_interval():
 # Run the Flask web app
 if __name__ == "__main__":
     port = int(input("Enter the port number for this node: "))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=port, debug=True)

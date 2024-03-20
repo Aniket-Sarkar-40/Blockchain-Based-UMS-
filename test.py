@@ -13,47 +13,29 @@ def select_item_without_repetition(item_set):
     return selected_item
 
 
-# Example usage
-item_set = {1,2,3,4,5}
+def select_member(peer_array, validators_array):
+    voteCount = [0] * len(validators_array)
 
-# print(item_set)
+    for peer in peer_array:
+        vote_index = random.randint(0, len(validators_array) - 1)
+        
+        voteCount[vote_index] += 1
 
-selc1 = select_item_without_repetition(item_set)
-print("Selected Item:", selc1)
-print("Remaining Set:", item_set)  # The original set is changed, and the selected item is removed
-print (tempList)
+    for validator in validators_array:
+        vote_index = random.randint(0, len(validators_array) - 1)
+        
+        voteCount[vote_index] += 1
 
-print()
+    max_vote_index = voteCount.index(max(voteCount))
 
-selc1 = select_item_without_repetition(item_set)
-print("Selected Item:", selc1)
-print("Remaining Set:", item_set)  # The original set is changed, and the selected item is removed
-print (tempList)
+    return max_vote_index
 
-print()
 
-selc1 = select_item_without_repetition(item_set)
-print("Selected Item:", selc1)
-print("Remaining Set:", item_set)  # The original set is changed, and the selected item is removed
-print (tempList)
+peer_array = ["Peer1", "Peer2", "Peer3", "Peer4"]
+validators_array = ["Validator1", "Validator2", "Validator3"]
 
-print()
+selected_member_index = select_member(peer_array, validators_array)
+selected_member = validators_array[selected_member_index]
 
-selc1 = select_item_without_repetition(item_set)
-print("Selected Item:", selc1)
-print("Remaining Set:", item_set)  # The original set is changed, and the selected item is removed
-print (tempList)
+print(f"The selected member is: {selected_member}")
 
-print()
-
-selc1 = select_item_without_repetition(item_set)
-print("Selected Item:", selc1)
-print("Remaining Set:", item_set)  # The original set is changed, and the selected item is removed
-print (tempList)
-
-print()
-
-selc1 = select_item_without_repetition(item_set)
-print("Selected Item:", selc1)
-print("Remaining Set:", item_set)  # The original set is changed, and the selected item is removed
-print (tempList)

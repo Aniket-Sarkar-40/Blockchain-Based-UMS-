@@ -58,7 +58,9 @@ messageObject = {
 reciever_public_key = getKey.sender_public_key
 reciever_private_key = getKey.sender_private_key
 
-output = decrypt(encrypt(messageObject, reciever_public_key), reciever_private_key)
+encrypted_msg = encrypt(messageObject, reciever_public_key)
+# print("Encrypted Message - ", encrypted_msg )
+output = decrypt(encrypted_msg, reciever_private_key)
 print("Decripted" , output["message"])
 
 # proof of authority - papers , r and d, drawback
