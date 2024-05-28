@@ -214,7 +214,7 @@ def getMinner():
 def new_transaction():
     tx_data = request.get_json()
     print(tx_data)
-    required_fields = ["collegeName", "phoneNo", "email", "message"]
+    required_fields = ["sender_id", "message"]
     for field in required_fields:
         if not tx_data.get(field):
             return "Invalid transaction data", 404
