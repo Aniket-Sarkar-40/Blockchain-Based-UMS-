@@ -4,6 +4,12 @@ import json
 from Private_Blockchain import PrivateBlockchain
 from flask_pymongo import PyMongo
 import sys
+from cryptography.fernet import Fernet
+import json
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa, padding
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.backends import default_backend
 
 app = Flask(__name__)
 import requests
@@ -17,6 +23,35 @@ app.config["MONGO_URI"] = (
 )
 mongo = PyMongo(app)
 db = mongo.db
+
+
+def encrypt(messageObject, public_key_str):
+    public_key_bytes = public_key_str.encode()
+    sender_public_key = serialization.load_pem_public_key(
+        public_key_bytes, backend=default_backend()
+    )
+    print("Public key: ", sender_public_key.public_numbers())
+    message = json.dumps(messageObject)
+
+    key = Fernet.generate_key()
+
+    f_obj = Fernet(key)
+    encryption_message1 = f_obj.encrypt(message.encode())
+    # Encrypt the Fernet key using RSA public key
+    encrypted_fernet_key = sender_public_key.encrypt(
+        key,
+        padding.OAEP(
+            mgf=padding.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=None,
+        ),
+    )
+
+    # Now 'encrypted_fernet_key' contains the encrypted Fernet key
+    # sending data
+    print("key:1 -", encrypted_fernet_key)
+    data = {"key": encrypted_fernet_key, "encryptedMsg": encryption_message1}
+    return data
 
 
 @app.route("/")
@@ -92,9 +127,6 @@ def mine():
     return flask.jsonify({"message": "mining successfull."})
 
 
-# Todo : create a mapping table for which node is connetced to which node and later on also the public key also
-
-
 @app.route("/sendDataToPublicChain", methods=["POST"])
 def sendDataToPublicChain():
     data = request.get_json()
@@ -106,6 +138,8 @@ def sendDataToPublicChain():
     validators = blockchain.view_all_validators()
     sender_id = data.get("sender_id")
     sender_id_found = False
+    public_key_bytes = mapping.get("Public_Key_Bytes")
+    encrypted_msg = encrypt(data, public_key_bytes)
 
     for validator in validators:
         if validator.get("id") == sender_id:
@@ -119,7 +153,7 @@ def sendDataToPublicChain():
 
     url = "{0}/newPrivateBlockTransaction".format(mapping.get("Public_Address"))
 
-    json_data = json.dumps(data, default=str, sort_keys=True)
+    json_data = json.dumps(encrypted_msg, default=str, sort_keys=True)
 
     requests.post(url, json=json_data)
 

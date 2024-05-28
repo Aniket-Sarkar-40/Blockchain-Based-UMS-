@@ -1,7 +1,6 @@
 from hashlib import sha512
 import json
 import sys
-from bson import ObjectId
 import time
 import random
 from flask_pymongo import PyMongo
@@ -9,6 +8,12 @@ from flask_pymongo import PyMongo
 from flask import Flask, request, jsonify
 import requests
 from urllib.parse import urlparse
+import getKey
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.backends import default_backend
+from cryptography.fernet import Fernet
 
 
 # Flask web application
@@ -73,6 +78,7 @@ class Blockchain:
         self.chain = []  # The immutable list that represets the actual Blockchain
         self.peers = set()
         self.create_genesis_block()
+        self.peersMap = []
 
     # Generates genesis block and appends it to the Blockchain
     # The Block has index o, previous_hash of 0 and a valid hash
@@ -80,7 +86,6 @@ class Blockchain:
         genesis_block = Block(0, [], time.time(), "0")
         genesis_block.hash = genesis_block.compute_hash()
         self.chain.append(genesis_block)
-        self.peers.add("127.0.0.1:5000")
 
     # Verifed block can be added to the chain, add it and return True or False
     def add_block(self, block, proof):
@@ -97,9 +102,20 @@ class Blockchain:
         self.chain.append(block)
         return True
 
-    def register_node(self, address):
+    def register_node(self, address, public_key_bytes, private_key_bytes):
         parsed_url = urlparse(address)
         self.peers.add(parsed_url.netloc)
+        new_node = {
+            "host": parsed_url.netloc,
+            "public_key_bytes": public_key_bytes,
+            "private_key_bytes": private_key_bytes,
+        }
+        self.peersMap.append(new_node)
+
+    def findPrivateKey(self, root_url):
+        for node in self.peersMap:
+            if node["host"] == root_url:
+                return node["private_key_bytes"]
 
     # Serve as interface to add the transactions to the blockchain by adding them
     # and then figuring out the PoW
@@ -192,6 +208,30 @@ class Blockchain:
 blockchain = Blockchain()
 
 
+def decrypt(data: dict, private_key: rsa.RSAPrivateKey):
+    # data = encrypt(messageObject)
+    # Decrypt the encrypted data using sender's private key
+    # private_key = serialization.load_der_private_key(
+    #     private_key_bytes,
+    #     password=None,  # Passphrase or encryption key used during encryption
+    #     backend=default_backend(),
+    # )
+    print("private key: ", private_key.decrypt)
+    print("key2: ", data["key"])
+    decrypted_key = private_key.decrypt(
+        data["key"],
+        padding.OAEP(
+            mgf=padding.MGF1(algorithm=hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=None,
+        ),
+    )
+    f1_obj = Fernet(decrypted_key)
+    decrypted_msg = f1_obj.decrypt(data["encryptedMsg"])
+    output = json.loads(decrypted_msg.decode())
+    return output
+
+
 tempList = []
 peerList = list(blockchain.peers)
 
@@ -231,8 +271,21 @@ def new_transaction():
 @app.route("/newPrivateBlockTransaction", methods=["POST"])
 # Submit a new transaction, which add new data to the blochain
 def newPrivateBlockTransaction():
-    tx_data = json.loads(request.get_json())
+    encripted_data = json.loads(request.get_json())
 
+    # Concatenate host and port to get the address
+    url = request.url_root
+    url = url.replace("http://", "")
+
+    # Remove the last character
+    root_url = url.rstrip("/")
+    privateKey = blockchain.findPrivateKey(root_url)
+    # print("Private key", privateKey)
+
+    if privateKey == None:
+        return "Invalid transaction", 404
+
+    tx_data = decrypt(encripted_data, privateKey)
     required_fields = ["sender_id", "message"]
     for field in required_fields:
         if not tx_data.get(field):
@@ -293,14 +346,34 @@ def register_nodes():
     values = request.get_json()
     Public_Address = values.get("Public_Address")
     Private_Address_Port = values.get("Private_Address")
+    Public_Key = getKey.public_key
+    Private_Key = getKey.private_key
+
+    print("before public key", Public_Key.public_numbers())
+
+    public_key_bytes = Public_Key.public_bytes(
+        encoding=serialization.Encoding.PEM,  # Use DER or another appropriate format
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    ).decode()
+
+    serialized_public_key = Public_Key.public_bytes(
+        encoding=serialization.Encoding.DER,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+
+    sender_public_key = serialization.load_der_public_key(
+        serialized_public_key, backend=default_backend()
+    )
+    print("Public key: ", sender_public_key.public_numbers())
 
     if (Public_Address or Private_Address_Port) is None:
         return "Please supply a valid Private and Public Address", 400
-    blockchain.register_node(Public_Address)
+    blockchain.register_node(Public_Address, public_key_bytes, Private_Key)
 
     payload = {
         "Public_Address": Public_Address,
         "Private_Address_Port": Private_Address_Port,
+        "Public_Key_Bytes": public_key_bytes,
     }
 
     db.Public_Private_Mapping.insert_one(payload)
