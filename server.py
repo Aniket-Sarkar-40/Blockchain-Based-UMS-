@@ -5,7 +5,7 @@ from bson import ObjectId
 import time
 import random
 from flask_pymongo import PyMongo
-
+from pymongo.errors import DuplicateKeyError
 from flask import Flask, request, jsonify
 import requests
 from urllib.parse import urlparse
@@ -20,6 +20,9 @@ app.config["MONGO_URI"] = (
 )
 mongo = PyMongo(app)
 db = mongo.db
+
+# Ensure unique index on the 'peer' field in the 'peers' collection
+db.peers.create_index("peer", unique=True)
 
 
 # A class that represents a Block, whcih stores one or more
@@ -62,6 +65,23 @@ def unconfirmed_transactions():
     return pendingTxn
 
 
+def add_peer_to_db(peer):
+    if not peer:
+        return {"error": "Peer value is required"}, 400
+
+    try:
+        db.peers.insert_one({"peer": peer})
+        return {"message": "Peer added successfully"}, 201
+    except DuplicateKeyError:
+        return {"error": "Peer already exists"}, 400
+
+
+def get_all_peers():
+    peers = db.peers.find({}, {"_id": 0, "peer": 1})
+    peers_list = [peer["peer"] for peer in peers]
+    return peers_list
+
+
 # A class that represents an immutable list of Block objects are chained together by hashes, a Blockchain.
 class Blockchain:
     # Difficult of PoW algorithm
@@ -71,7 +91,7 @@ class Blockchain:
     def __init__(self):
         # self.unconfirmed_transactions = self.unconfirmed_transactions()  # These are pieces of data that are not yet added to the Blockchain.
         self.chain = []  # The immutable list that represets the actual Blockchain
-        self.peers = set()
+        # self.peers = set()
         self.create_genesis_block()
 
     # Generates genesis block and appends it to the Blockchain
@@ -80,7 +100,7 @@ class Blockchain:
         genesis_block = Block(0, [], time.time(), "0")
         genesis_block.hash = genesis_block.compute_hash()
         self.chain.append(genesis_block)
-        self.peers.add("127.0.0.1:5000")
+        # self.peers.add("127.0.0.1:5000")
 
     # Verifed block can be added to the chain, add it and return True or False
     def add_block(self, block, proof):
@@ -99,7 +119,7 @@ class Blockchain:
 
     def register_node(self, address):
         parsed_url = urlparse(address)
-        self.peers.add(parsed_url.netloc)
+        add_peer_to_db(parsed_url.netloc)
 
     # Serve as interface to add the transactions to the blockchain by adding them
     # and then figuring out the PoW
@@ -192,13 +212,9 @@ class Blockchain:
 blockchain = Blockchain()
 
 
-tempList = []
-peerList = list(blockchain.peers)
-
-
 def getMinner():
-    global tempList
-    global peerList
+    peerList = get_all_peers()
+    tempList = []
     if len(peerList) == 0:
         while tempList:  # While tempList is not empty, remove all items from it
             peerList.append(tempList.pop())
@@ -226,6 +242,13 @@ def new_transaction():
     else:
         response = {"message": "Transaction added successfully.", "Mine": res}
     return response, 201
+
+
+@app.route("/get_peers", methods=["GET"])
+def get_peers():
+    peers = db.peers.find({}, {"_id": 0, "peer": 1})
+    peers_list = [peer["peer"] for peer in peers]
+    return jsonify(peers_list)
 
 
 @app.route("/newPrivateBlockTransaction", methods=["POST"])
@@ -307,7 +330,6 @@ def register_nodes():
 
     response = {
         "message": "New node have been successfully added",
-        "total_nodes": list(blockchain.peers),
     }
     return jsonify(response), 201
 
@@ -351,7 +373,8 @@ def validate_and_add_block():
 
 
 def announce_new_block(block):
-    for peer in blockchain.peers:
+    peerList = get_all_peers()
+    for peer in peerList:
         url = "http://{0}/add_block".format(peer)
         data = block.__dict__
 
